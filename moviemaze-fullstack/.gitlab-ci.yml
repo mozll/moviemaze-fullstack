@@ -1,0 +1,68 @@
+# Define the stages involved in the pipeline
+stages:
+  - setup # Install, builds and lints project
+  - test # Run Jest tests on project
+  - audit # Check dependencies for vulnerabilities
+  - build-docker-images # Build and push new docker images to GitLab Registry -> Only runs after a merge to main
+
+frontend_setup:
+  stage: setup
+  image: node:latest  # Using node so npm works
+  script:
+    - cd moviemaze-ui
+    - npm install
+    - npm run build
+    - npm run lint
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+frontend_test:
+  stage: test
+  image: node:latest  
+  script:
+    - cd moviemaze-ui
+    - npm install
+    - npm run test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+frontend_audit:
+  stage: audit
+  image: node:latest  
+  script:
+    - cd moviemaze-ui
+    - npm install
+    - npm audit
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      
+variables:
+  DOCKER_DRIVER: overlay2
+
+before_script:
+  - echo "Setting up environment"
+
+build_and_push:
+  stage: build-docker-images # Specify that this job belongs to the 'build' stage
+  image: docker:24.0.6 # Use the latest Docker image to run this job
+  services:
+    - docker:24.0.6-dind # Use Docker-in-Docker service to allow Docker commands within this job
+
+  # The script that will be executed by this job
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    # Login to the GitLab Docker registry using the provided CI/CD environment variables
+
+    - docker build --no-cache --build-arg VITE_API_KEY=$VITE_API_KEY -t "$CI_REGISTRY_IMAGE/ui:latest" ./moviemaze-ui
+    # Build the Docker image with build arguments from the Dockerfile in the ui directory
+
+    - docker build --no-cache -t "$CI_REGISTRY_IMAGE/api:latest" ./moviemaze-api
+    # Build the Docker image with build arguments from the Dockerfile in the api directory
+
+    - docker push "$CI_REGISTRY_IMAGE/ui:latest"
+    - docker push "$CI_REGISTRY_IMAGE/api:latest"
+    # Push the built images to the GitLab Docker registry
+
+  only:
+    - main
+    # For testing purposes we only do it on ci-test branch, can be changed to main when testing is completed
